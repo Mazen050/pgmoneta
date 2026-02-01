@@ -138,12 +138,25 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y lcov
+      - name: Convert clang coverage to LCOV
+        if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
+        run: |
+          # Merge raw profiles
+          llvm-profdata merge -sparse /tmp/pgmoneta-test/coverage/*.profraw \
+            -o /tmp/pgmoneta-test/coverage/coverage.profdata
+
+          # Generate LCOV file
+          llvm-cov export \
+            ./build/src/pgmoneta \
+            -instr-profile=/tmp/pgmoneta-test/coverage/coverage.profdata \
+            -format=lcov \
+            > /tmp/pgmoneta-test/coverage/coverage.info
 
       - name: Report code coverage
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
         uses: zgosalvez/github-actions-report-lcov@v6
         with:
-          coverage-files: /tmp/pgmoneta-test/coverage/*.info
+          coverage-files: /tmp/pgmoneta-test/coverage/coverage.info
           github-token: ${{ secrets.GITHUB_TOKEN }}
           update-comment: true
           minimum-coverage: 70
