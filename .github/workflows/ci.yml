@@ -124,8 +124,8 @@ jobs:
           if [ "${{ matrix.compiler }}" = "clang" ] && [ "${{ matrix.build_type }}" = "Debug" ]; then
             cmake -DCMAKE_BUILD_TYPE=Debug \
                   -DDOCS=FALSE \
-                  -DCMAKE_C_FLAGS="--coverage -fprofile-instr-generate -fcoverage-mapping" \
-                  -DCMAKE_CXX_FLAGS="--coverage -fprofile-instr-generate -fcoverage-mapping" ..
+                  -DCMAKE_C_FLAGS="--coverage" \
+                  -DCMAKE_CXX_FLAGS="--coverage" ..
           else
             cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DDOCS=FALSE ..
           fi
@@ -152,19 +152,14 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y lcov
-      - name: Convert clang coverage to LCOV
+
+      - name: Generate LCOV from gcov
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
         run: |
-          # Merge raw profiles
-          llvm-profdata merge -sparse /tmp/pgmoneta-test/coverage/*.profraw \
-            -o /tmp/pgmoneta-test/coverage/coverage.profdata
-
-          # Generate LCOV file
-          llvm-cov export \
-            ./build/src/pgmoneta \
-            -instr-profile=/tmp/pgmoneta-test/coverage/coverage.profdata \
-            -format=lcov \
-            > /tmp/pgmoneta-test/coverage/coverage.info
+          lcov --capture \
+               --directory /home/runner/work/pgmoneta/pgmoneta/build \
+               --output-file /tmp/pgmoneta-test/coverage/coverage.info \
+               --ignore-errors inconsistent,source
 
       - name: Report code coverage
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
