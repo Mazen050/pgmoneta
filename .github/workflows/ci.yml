@@ -41,6 +41,8 @@ jobs:
   build-linux:
     needs: [format-check]
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
 
     strategy:
       # Define all possible variables
@@ -131,17 +133,15 @@ jobs:
           fi
         working-directory: /home/runner/work/pgmoneta/pgmoneta/
 
-      - name: Display Coverage Summary
+      - name: Report code coverage
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
-        run: |
-          echo "## Code Coverage Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-      
-          for f in /tmp/pgmoneta-test/coverage/coverage-report-*.txt; do
-            echo "### $(basename "$f")" >> $GITHUB_STEP_SUMMARY
-            cat "$f" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          done
+        uses: zgosalvez/github-actions-report-lcov@v6
+        with:
+          coverage-files: /tmp/pgmoneta-test/coverage/*.info
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          update-comment: true
+          minimum-coverage: 70
+
       
       - name: Upload All Coverage Reports as Artifact
         if: always()
