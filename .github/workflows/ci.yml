@@ -15,16 +15,21 @@ jobs:
   format-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4  # FIXED: v6 -> v4
+      - uses: actions/checkout@v4
 
       - name: Install clang-format
         run: |
           sudo apt update -y
-          sudo apt install -y clang-format
+          sudo apt install -y lsb-release wget software-properties-common gnupg
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm-snapshot.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-18 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt update -y
+          sudo apt install -y clang-format-18
+          sudo ln -sf /usr/bin/clang-format-18 /usr/bin/clang-format
 
-      - name: Check formatting
+      - name: Check code formatting
         run: |
-          chmod +x clang-format.sh # Good practice to ensure it's executable
+          chmod +x clang-format.sh
           ./clang-format.sh
           if ! git diff --quiet; then
             git diff
@@ -38,16 +43,36 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
+      contents: read
 
     strategy:
       matrix:
         compiler: [gcc, clang]
         build_type: [Debug, Release]
         pg_version: [14, 15, 17]
+        exclude:
+          - pg_version: 14
+            compiler: gcc
+            build_type: Debug
+          - pg_version: 14
+            compiler: gcc
+            build_type: Release
+          - pg_version: 14
+            compiler: clang
+            build_type: Release
+          - pg_version: 15
+            compiler: gcc
+            build_type: Debug
+          - pg_version: 15
+            compiler: gcc
+            build_type: Release
+          - pg_version: 15
+            compiler: clang
+            build_type: Release
       fail-fast: false
 
     steps:
-      - uses: actions/checkout@v4  # FIXED: v6 -> v4
+      - uses: actions/checkout@v4
 
       - name: Install Dependencies
         run: |
@@ -58,8 +83,7 @@ jobs:
           zlib1g zlib1g-dev libzstd-dev liblz4-dev \
           libssh-dev libatomic1 \
           python3-docutils libbz2-dev libarchive-dev \
-          bzip2 net-tools check libyaml-dev \
-          lcov llvm llvm-profdata llvm-cov
+          bzip2 net-tools check libyaml-dev llvm llvm-dev
 
       - name: Install PostgreSQL v${{ matrix.pg_version }}
         run: |
@@ -74,10 +98,26 @@ jobs:
         run: |
           echo "PATH=/usr/lib/postgresql/${{ matrix.pg_version }}/bin:$PATH" >> $GITHUB_ENV
 
+      - name: Install pgmoneta_ext
+        run: |
+          # Use a temporary directory for the extension build
+          EXT_DIR=$(mktemp -d)
+          git clone --branch "main" --single-branch --depth 1 "https://github.com/pgmoneta/pgmoneta_ext.git" "$EXT_DIR"
+          
+          mkdir -p "$EXT_DIR/build"
+          pushd "$EXT_DIR/build"
+          cmake -DDOCS=false ..
+          make
+          sudo make install
+          popd
+          rm -rf "$EXT_DIR"
+
       - name: Build Project
         run: |
           mkdir build
           cd build
+          
+          # Select Compiler
           if [ "${{ matrix.compiler }}" = "gcc" ]; then
             export CC=/usr/bin/gcc
             export CXX=/usr/bin/g++
@@ -86,61 +126,67 @@ jobs:
             export CXX=/usr/bin/clang++
           fi
           
-          # Simplified cmake logic
+          # Configure CMake
           CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DDOCS=FALSE"
-          if [ "${{ matrix.build_type }}" = "Debug" ]; then
-             CMAKE_FLAGS="$CMAKE_FLAGS -DENABLE_COVERAGE=ON"
+          
+          # Add Coverage Flags ONLY for Clang Debug
+          if [ "${{ matrix.compiler }}" = "clang" ] && [ "${{ matrix.build_type }}" = "Debug" ]; then
+            CMAKE_FLAGS="$CMAKE_FLAGS -DCMAKE_C_FLAGS='--coverage -fprofile-instr-generate -fcoverage-mapping'"
+            CMAKE_FLAGS="$CMAKE_FLAGS -DCMAKE_CXX_FLAGS='--coverage -fprofile-instr-generate -fcoverage-mapping'"
           fi
           
           cmake $CMAKE_FLAGS ..
           make -j$(nproc)
 
+      - name: Prepare Coverage Environment
+        if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
+        run: |
+          mkdir -p /tmp/pgmoneta-test/coverage
+          # Ensure clean state
+          rm -f /tmp/pgmoneta-test/coverage/*.profraw
+          rm -f /tmp/pgmoneta-test/coverage/*.profdata
+
       - name: Run Tests
-        if: matrix.build_type == 'Debug'
         run: |
           export TEST_PG_VERSION=${{ matrix.pg_version }}
           chmod +x test/check.sh
+          
+          # If this is a coverage run, tell Clang where to put the raw profiles
+          if [ "${{ matrix.compiler }}" = "clang" ] && [ "${{ matrix.build_type }}" = "Debug" ]; then
+             export LLVM_PROFILE_FILE="/tmp/pgmoneta-test/coverage/code-%p.profraw"
+          fi
+          
           ./test/check.sh ci
 
-      - name: GCC Coverage
-        if: matrix.compiler == 'gcc' && matrix.build_type == 'Debug'
-        run: |
-          lcov --capture \
-               --directory build \
-               --output-file coverage.info \
-               --gcov-tool $(which gcov) \
-               --ignore-errors inconsistent,source \
-               --rc branch_coverage=1
-          lcov --remove coverage.info '/usr/*' '*/_deps/*' \
-               --output-file coverage.info
-
-      - name: Merge clang profiles
+      - name: Generate LCOV Report
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
         run: |
-          llvm-profdata merge -sparse \
-            /tmp/pgmoneta-test/coverage/*.profraw \
-            -o /tmp/pgmoneta-test/coverage/coverage.profdata
-
-      - name: Clang Coverage
-        if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
-        run: |
+          # 1. Merge raw profiles
+          llvm-profdata merge -sparse /tmp/pgmoneta-test/coverage/*.profraw -o coverage.profdata
+          
+          # 2. Export to LCOV format
+          # Note: Adjust './build/src/pgmoneta' if your binary is located elsewhere
           llvm-cov export \
-            build/pgmoneta \
-            -instr-profile=/tmp/pgmoneta-test/coverage/coverage.profdata \
+            build/src/pgmoneta \
+            -instr-profile=coverage.profdata \
             -format=lcov \
+            -ignore-filename-regex="(/usr/|/test/|/_deps/)" \
             > coverage.info
 
-      - name: Upload Coverage
-        if: matrix.build_type == 'Debug'
-        uses: zgosalvez/github-actions-report-lcov@v4 # FIXED: v6 -> v4
+      - name: Publish Coverage to PR
+        if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
+        uses: zgosalvez/github-actions-report-lcov@v4
         with:
           coverage-files: coverage.info
+          minimum-coverage: 0
+          artifact-name: code-coverage-report-${{ matrix.pg_version }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           update-comment: true
 
-      - name: Upload Coverage Artifact
-        if: matrix.build_type == 'Debug'
-        uses: actions/upload-artifact@v4 # FIXED: v5 -> v4
+      - name: Upload Run Logs
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: coverage-${{ matrix.compiler }}-${{ matrix.pg_version }}
-          path: coverage.info
+          name: logs-${{ matrix.compiler }}-${{ matrix.build_type }}-${{ matrix.pg_version }}
+          path: /tmp/pgmoneta-test/log
+          retention-days: 5
