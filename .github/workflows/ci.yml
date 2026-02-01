@@ -15,7 +15,7 @@ jobs:
   format-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4  # FIXED: v6 -> v4
 
       - name: Install clang-format
         run: |
@@ -24,6 +24,7 @@ jobs:
 
       - name: Check formatting
         run: |
+          chmod +x clang-format.sh # Good practice to ensure it's executable
           ./clang-format.sh
           if ! git diff --quiet; then
             git diff
@@ -39,7 +40,6 @@ jobs:
       pull-requests: write
 
     strategy:
-      # Define all possible variables
       matrix:
         compiler: [gcc, clang]
         build_type: [Debug, Release]
@@ -47,7 +47,7 @@ jobs:
       fail-fast: false
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4  # FIXED: v6 -> v4
 
       - name: Install Dependencies
         run: |
@@ -73,7 +73,6 @@ jobs:
       - name: Set Env Path Variable
         run: |
           echo "PATH=/usr/lib/postgresql/${{ matrix.pg_version }}/bin:$PATH" >> $GITHUB_ENV
-          echo $PATH
 
       - name: Build Project
         run: |
@@ -86,22 +85,22 @@ jobs:
             export CC=/usr/bin/clang
             export CXX=/usr/bin/clang++
           fi
+          
+          # Simplified cmake logic
+          CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DDOCS=FALSE"
           if [ "${{ matrix.build_type }}" = "Debug" ]; then
-            cmake -DCMAKE_BUILD_TYPE=Debug \
-                  -DENABLE_COVERAGE=ON \
-                  -DDOCS=FALSE ..
-          else
-            cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-                  -DDOCS=FALSE ..
+             CMAKE_FLAGS="$CMAKE_FLAGS -DENABLE_COVERAGE=ON"
           fi
+          
+          cmake $CMAKE_FLAGS ..
           make -j$(nproc)
 
       - name: Run Tests
         if: matrix.build_type == 'Debug'
         run: |
           export TEST_PG_VERSION=${{ matrix.pg_version }}
+          chmod +x test/check.sh
           ./test/check.sh ci
-
 
       - name: GCC Coverage
         if: matrix.compiler == 'gcc' && matrix.build_type == 'Debug'
@@ -114,7 +113,6 @@ jobs:
                --rc branch_coverage=1
           lcov --remove coverage.info '/usr/*' '*/_deps/*' \
                --output-file coverage.info
-
 
       - name: Merge clang profiles
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
@@ -134,7 +132,7 @@ jobs:
 
       - name: Upload Coverage
         if: matrix.build_type == 'Debug'
-        uses: zgosalvez/github-actions-report-lcov@v6
+        uses: zgosalvez/github-actions-report-lcov@v4 # FIXED: v6 -> v4
         with:
           coverage-files: coverage.info
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -142,7 +140,7 @@ jobs:
 
       - name: Upload Coverage Artifact
         if: matrix.build_type == 'Debug'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4 # FIXED: v5 -> v4
         with:
           name: coverage-${{ matrix.compiler }}-${{ matrix.pg_version }}
           path: coverage.info
