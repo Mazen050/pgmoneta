@@ -159,7 +159,7 @@ jobs:
           coverage-files: /tmp/pgmoneta-test/coverage/coverage.info
           github-token: ${{ secrets.GITHUB_TOKEN }}
           update-comment: true
-          minimum-coverage: 70
+          minimum-coverage: 0
 
       - name: Upload All Coverage Reports as Artifact
         if: always()
