@@ -153,13 +153,15 @@ jobs:
           sudo apt update
           sudo apt install -y lcov
 
-      - name: Generate LCOV from gcov
+      - name: Generate LCOV
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
         run: |
           lcov --capture \
                --directory /home/runner/work/pgmoneta/pgmoneta/build \
                --output-file /tmp/pgmoneta-test/coverage/coverage.info \
-               --ignore-errors inconsistent,source
+               --ignore-errors inconsistent,source,version \
+               --gcov-tool $(which gcov) \
+               --rc lcov_branch_coverage=1
 
       - name: Report code coverage
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
