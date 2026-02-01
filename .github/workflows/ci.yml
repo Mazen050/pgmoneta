@@ -131,6 +131,18 @@ jobs:
           fi
         working-directory: /home/runner/work/pgmoneta/pgmoneta/
 
+      - name: Display Coverage Summary
+        if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
+        run: |
+          echo "## Code Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+      
+          for f in /tmp/pgmoneta-test/coverage/coverage-report-*.txt; do
+            echo "### $(basename "$f")" >> $GITHUB_STEP_SUMMARY
+            cat "$f" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          done
+      
       - name: Upload All Coverage Reports as Artifact
         if: always()
         uses: actions/upload-artifact@v5
