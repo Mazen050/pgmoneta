@@ -133,6 +133,12 @@ jobs:
           fi
         working-directory: /home/runner/work/pgmoneta/pgmoneta/
 
+      - name: Install lcov
+        if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
+        run: |
+          sudo apt update
+          sudo apt install -y lcov
+
       - name: Report code coverage
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
         uses: zgosalvez/github-actions-report-lcov@v6
@@ -142,7 +148,6 @@ jobs:
           update-comment: true
           minimum-coverage: 70
 
-      
       - name: Upload All Coverage Reports as Artifact
         if: always()
         uses: actions/upload-artifact@v5
