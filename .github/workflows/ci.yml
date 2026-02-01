@@ -132,6 +132,13 @@ jobs:
           make -j$(nproc)
         working-directory: /home/runner/work/pgmoneta/pgmoneta/
 
+      - name: Clean old coverage files
+        if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
+        run: |
+          rm -f /tmp/pgmoneta-test/coverage/*.profraw
+          rm -f /tmp/pgmoneta-test/coverage/*.profdata
+          rm -f /tmp/pgmoneta-test/coverage/*.info
+
       - name: Run Tests
         run: |
           export TEST_PG_VERSION=${{ matrix.pg_version }}
