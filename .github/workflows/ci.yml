@@ -121,23 +121,9 @@ jobs:
           else
             export CC=/usr/bin/clang
           fi
-          if [ "${{ matrix.compiler }}" = "clang" ] && [ "${{ matrix.build_type }}" = "Debug" ]; then
-            cmake -DCMAKE_BUILD_TYPE=Debug \
-                  -DDOCS=FALSE \
-                  -DCMAKE_C_FLAGS="--coverage -fprofile-instr-generate -fcoverage-mapping" \
-                  -DCMAKE_CXX_FLAGS="--coverage -fprofile-instr-generate -fcoverage-mapping" ..
-          else
-            cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DDOCS=FALSE ..
-          fi
+          cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DDOCS=FALSE ..
           make -j$(nproc)
         working-directory: /home/runner/work/pgmoneta/pgmoneta/
-
-      - name: Clean old coverage files
-        if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
-        run: |
-          rm -f /tmp/pgmoneta-test/coverage/*.profraw
-          rm -f /tmp/pgmoneta-test/coverage/*.profdata
-          rm -f /tmp/pgmoneta-test/coverage/*.info
 
       - name: Run Tests
         run: |
