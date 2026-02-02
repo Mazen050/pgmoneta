@@ -41,8 +41,6 @@ jobs:
   build-linux:
     needs: [format-check]
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
 
     strategy:
       # Define all possible variables
@@ -133,66 +131,14 @@ jobs:
           fi
         working-directory: /home/runner/work/pgmoneta/pgmoneta/
 
-      - name: Install lcov
-        if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
-        run: |
-          sudo apt update
-          sudo apt install -y lcov
-      - name: Convert clang coverage to LCOV
-        if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
-        run: |
-          # Check files and remove corrupt ones
-          for f in /tmp/pgmoneta-test/coverage/*.profraw; do
-            if [ -f "$f" ]; then
-               if ! llvm-profdata show "$f" >/dev/null 2>&1; then
-                  echo "Removing corrupt profile: $f"
-                  rm -f "$f"
-               fi
-            fi
-          done
-          # Merge raw profiles
-          llvm-profdata merge -sparse /tmp/pgmoneta-test/coverage/*.profraw \
-            -o /tmp/pgmoneta-test/coverage/coverage.profdata
-
-          # Generate LCOV file
-          llvm-cov export \
-            ./build/src/pgmoneta \
-            -instr-profile=/tmp/pgmoneta-test/coverage/coverage.profdata \
-            -format=lcov \
-            > /tmp/pgmoneta-test/coverage/coverage.info
-
-      - name: Report code coverage
-        if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
-        uses: zgosalvez/github-actions-report-lcov@v6
-        with:
-          coverage-files: /tmp/pgmoneta-test/coverage/coverage.info
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          update-comment: true
-          minimum-coverage: 0
-
       - name: Add summary to GitHub
+        if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
         run: |
           echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           cat /tmp/pgmoneta-test/coverage/coverage-report-*.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          
-      - name: Add summary to GitHub
-        run: |
-          echo "## Coverage Summary"
-          echo ""
-          echo '```'
-          cat /tmp/pgmoneta-test/coverage/coverage-report-*.txt
-          echo '```'
-
-      - name: Add summary to GitHub
-        run: |
-          echo "## Coverage Summary"
-          echo ""
-          echo ''
-          cat /tmp/pgmoneta-test/coverage/coverage-report-*.txt
-          echo ''
 
       - name: Upload All Coverage Reports as Artifact
         if: always()
