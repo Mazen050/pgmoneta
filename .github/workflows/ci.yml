@@ -30,7 +30,6 @@ jobs:
 
       - name: Check code formatting
         run: |
-          chmod +x clang-format.sh
           ./clang-format.sh
           if ! git diff --quiet; then
             git diff
@@ -44,13 +43,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
-      contents: read
 
     strategy:
+      # Define all possible variables
       matrix:
         compiler: [gcc, clang]
         build_type: [Debug, Release]
         pg_version: [14, 15, 17]
+        # Exclude the unwanted v14 combinations
         exclude:
           - pg_version: 14
             compiler: gcc
@@ -84,7 +84,7 @@ jobs:
           zlib1g zlib1g-dev libzstd-dev liblz4-dev \
           libssh-dev libatomic1 \
           python3-docutils libbz2-dev libarchive-dev \
-          bzip2 net-tools check libyaml-dev llvm llvm-dev
+          bzip2 net-tools check libyaml-dev llvm
 
       - name: Install PostgreSQL v${{ matrix.pg_version }}
         run: |
@@ -98,96 +98,85 @@ jobs:
       - name: Set Env Path Variable
         run: |
           echo "PATH=/usr/lib/postgresql/${{ matrix.pg_version }}/bin:$PATH" >> $GITHUB_ENV
+          echo $PATH
 
       - name: Install pgmoneta_ext
         run: |
-          EXT_DIR=$(mktemp -d)
-          git clone --branch "main" --single-branch --depth 1 "https://github.com/pgmoneta/pgmoneta_ext.git" "$EXT_DIR"
-          mkdir -p "$EXT_DIR/build"
-          pushd "$EXT_DIR/build"
+          git_repo="https://github.com/pgmoneta/pgmoneta_ext.git"
+          cd /tmp/
+          git clone --branch "main" --single-branch --depth 1 "$git_repo"
+          cd /tmp/pgmoneta_ext/
+          mkdir build
+          cd /tmp/pgmoneta_ext/build/
           cmake -DDOCS=false ..
           make
           sudo make install
-          popd
-          rm -rf "$EXT_DIR"
 
       - name: Build Project
         run: |
           mkdir build
           cd build
-          
           if [ "${{ matrix.compiler }}" = "gcc" ]; then
             export CC=/usr/bin/gcc
-            export CXX=/usr/bin/g++
           else
             export CC=/usr/bin/clang
-            export CXX=/usr/bin/clang++
           fi
-          
-          # Default Flags
-          CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DDOCS=FALSE"
-          
-          # Add Coverage Flags ONLY for Clang + Debug
           if [ "${{ matrix.compiler }}" = "clang" ] && [ "${{ matrix.build_type }}" = "Debug" ]; then
-            CMAKE_FLAGS="$CMAKE_FLAGS -DCMAKE_C_FLAGS='--coverage -fprofile-instr-generate -fcoverage-mapping' -DCMAKE_CXX_FLAGS='--coverage -fprofile-instr-generate -fcoverage-mapping'"
+            cmake -DCMAKE_BUILD_TYPE=Debug \
+                  -DDOCS=FALSE \
+                  -DCMAKE_C_FLAGS="--coverage -fprofile-instr-generate -fcoverage-mapping" \
+                  -DCMAKE_CXX_FLAGS="--coverage -fprofile-instr-generate -fcoverage-mapping" ..
+          else
+            cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DDOCS=FALSE ..
           fi
-          
-          cmake $CMAKE_FLAGS ..
           make -j$(nproc)
+        working-directory: /home/runner/work/pgmoneta/pgmoneta/
 
       - name: Clean old coverage files
-        # Only needed if we are actually tracking coverage (Clang+Debug)
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
         run: |
-          rm -rf /tmp/pgmoneta-test/coverage
-          mkdir -p /tmp/pgmoneta-test/coverage
+          rm -f /tmp/pgmoneta-test/coverage/*.profraw
+          rm -f /tmp/pgmoneta-test/coverage/*.profdata
+          rm -f /tmp/pgmoneta-test/coverage/*.info
 
       - name: Run Tests
         run: |
           export TEST_PG_VERSION=${{ matrix.pg_version }}
-          chmod +x test/check.sh
-          
-          # Only export the profile path if it is Clang + Debug
           if [ "${{ matrix.compiler }}" = "clang" ] && [ "${{ matrix.build_type }}" = "Debug" ]; then
-             export LLVM_PROFILE_FILE="/tmp/pgmoneta-test/coverage/code-%p.profraw"
+            $(which bash) ./test/check.sh ci
           fi
-          
-          # Run tests for EVERYONE (GCC and Clang)
-          ./test/check.sh ci
+        working-directory: /home/runner/work/pgmoneta/pgmoneta/
 
       - name: Install lcov
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
         run: |
           sudo apt update
           sudo apt install -y lcov
-
       - name: Convert clang coverage to LCOV
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
         run: |
+          # Merge raw profiles
           llvm-profdata merge -sparse /tmp/pgmoneta-test/coverage/*.profraw \
             -o /tmp/pgmoneta-test/coverage/coverage.profdata
 
+          # Generate LCOV file
           llvm-cov export \
             ./build/src/pgmoneta \
             -instr-profile=/tmp/pgmoneta-test/coverage/coverage.profdata \
             -format=lcov \
-            -ignore-filename-regex="(/usr/|/test/|/_deps/)" \
             > /tmp/pgmoneta-test/coverage/coverage.info
 
       - name: Report code coverage
-        # Report ONLY if: 1. It is a PR, 2. It is Clang, 3. It is Debug
-        if: github.event_name == 'pull_request' && matrix.compiler == 'clang' && matrix.build_type == 'Debug'
+        if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
         uses: zgosalvez/github-actions-report-lcov@v6
         with:
           coverage-files: /tmp/pgmoneta-test/coverage/coverage.info
           github-token: ${{ secrets.GITHUB_TOKEN }}
           update-comment: true
           minimum-coverage: 0
-          artifact-name: code-coverage-report-${{ matrix.pg_version }}
 
       - name: Upload All Coverage Reports as Artifact
-        # Only upload artifacts for the coverage run
-        if: always() && matrix.compiler == 'clang' && matrix.build_type == 'Debug'
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           name: coverage-reports-${{ matrix.compiler }}-${{ matrix.build_type }}-${{ matrix.pg_version }}
