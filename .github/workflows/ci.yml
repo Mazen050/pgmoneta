@@ -155,6 +155,15 @@ jobs:
       - name: Convert clang coverage to LCOV
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
         run: |
+          # Check files and remove corrupt ones
+          for f in /tmp/pgmoneta-test/coverage/*.profraw; do
+            if [ -f "$f" ]; then
+               if ! llvm-profdata show "$f" >/dev/null 2>&1; then
+                  echo "Removing corrupt profile: $f"
+                  rm -f "$f"
+               fi
+            fi
+          done
           # Merge raw profiles
           llvm-profdata merge -sparse /tmp/pgmoneta-test/coverage/*.profraw \
             -o /tmp/pgmoneta-test/coverage/coverage.profdata
