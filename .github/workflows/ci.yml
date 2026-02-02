@@ -170,6 +170,14 @@ jobs:
           update-comment: true
           minimum-coverage: 0
 
+      - name: Add summary to GitHub
+        run: |
+          echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat coverage.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+      
       - name: Upload All Coverage Reports as Artifact
         if: always()
         uses: actions/upload-artifact@v5
