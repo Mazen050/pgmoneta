@@ -101,10 +101,8 @@ jobs:
 
       - name: Install pgmoneta_ext
         run: |
-          # Use mktemp to avoid directory conflicts
           EXT_DIR=$(mktemp -d)
           git clone --branch "main" --single-branch --depth 1 "https://github.com/pgmoneta/pgmoneta_ext.git" "$EXT_DIR"
-          
           mkdir -p "$EXT_DIR/build"
           pushd "$EXT_DIR/build"
           cmake -DDOCS=false ..
@@ -118,7 +116,6 @@ jobs:
           mkdir build
           cd build
           
-          # Select Compiler
           if [ "${{ matrix.compiler }}" = "gcc" ]; then
             export CC=/usr/bin/gcc
             export CXX=/usr/bin/g++
@@ -127,10 +124,10 @@ jobs:
             export CXX=/usr/bin/clang++
           fi
           
-          # Configure CMake Flags
+          # Default Flags
           CMAKE_FLAGS="-DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DDOCS=FALSE"
           
-          # Add Coverage Flags ONLY for Clang Debug
+          # Add Coverage Flags ONLY for Clang + Debug
           if [ "${{ matrix.compiler }}" = "clang" ] && [ "${{ matrix.build_type }}" = "Debug" ]; then
             CMAKE_FLAGS="$CMAKE_FLAGS -DCMAKE_C_FLAGS='--coverage -fprofile-instr-generate -fcoverage-mapping' -DCMAKE_CXX_FLAGS='--coverage -fprofile-instr-generate -fcoverage-mapping'"
           fi
@@ -139,6 +136,7 @@ jobs:
           make -j$(nproc)
 
       - name: Clean old coverage files
+        # Only needed if we are actually tracking coverage (Clang+Debug)
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
         run: |
           rm -rf /tmp/pgmoneta-test/coverage
@@ -149,11 +147,12 @@ jobs:
           export TEST_PG_VERSION=${{ matrix.pg_version }}
           chmod +x test/check.sh
           
-          # Tells Clang where to write the raw profile data during execution
+          # Only export the profile path if it is Clang + Debug
           if [ "${{ matrix.compiler }}" = "clang" ] && [ "${{ matrix.build_type }}" = "Debug" ]; then
              export LLVM_PROFILE_FILE="/tmp/pgmoneta-test/coverage/code-%p.profraw"
           fi
           
+          # Run tests for EVERYONE (GCC and Clang)
           ./test/check.sh ci
 
       - name: Install lcov
@@ -165,11 +164,9 @@ jobs:
       - name: Convert clang coverage to LCOV
         if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
         run: |
-          # 1. Merge raw profiles
           llvm-profdata merge -sparse /tmp/pgmoneta-test/coverage/*.profraw \
             -o /tmp/pgmoneta-test/coverage/coverage.profdata
 
-          # 2. Export to LCOV format
           llvm-cov export \
             ./build/src/pgmoneta \
             -instr-profile=/tmp/pgmoneta-test/coverage/coverage.profdata \
@@ -178,16 +175,19 @@ jobs:
             > /tmp/pgmoneta-test/coverage/coverage.info
 
       - name: Report code coverage
-        if: matrix.compiler == 'clang' && matrix.build_type == 'Debug'
-        uses: zgosalvez/github-actions-report-lcov@v4
+        # Report ONLY if: 1. It is a PR, 2. It is Clang, 3. It is Debug
+        if: github.event_name == 'pull_request' && matrix.compiler == 'clang' && matrix.build_type == 'Debug'
+        uses: zgosalvez/github-actions-report-lcov@v6
         with:
           coverage-files: /tmp/pgmoneta-test/coverage/coverage.info
           github-token: ${{ secrets.GITHUB_TOKEN }}
           update-comment: true
           minimum-coverage: 0
+          artifact-name: code-coverage-report-${{ matrix.pg_version }}
 
       - name: Upload All Coverage Reports as Artifact
-        if: always()
+        # Only upload artifacts for the coverage run
+        if: always() && matrix.compiler == 'clang' && matrix.build_type == 'Debug'
         uses: actions/upload-artifact@v5
         with:
           name: coverage-reports-${{ matrix.compiler }}-${{ matrix.build_type }}-${{ matrix.pg_version }}
